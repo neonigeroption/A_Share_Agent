@@ -1,0 +1,17 @@
+# 环境变量（含 API Key，绝对不能提交）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE
+.vscode/
+.idea/
+
+# 临时文件
+tempCodeRunnerFile.py
+
+# 模拟持仓数据（个人交易记录）
+portfolio_data.json

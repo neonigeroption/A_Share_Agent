@@ -1,0 +1,8 @@
+streamlit
+akshare
+openai
+python-dotenv
+pandas
+plotly
+faiss-cpu
+numpy
