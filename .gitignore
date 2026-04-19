@@ -14,9 +14,6 @@ __pycache__/
 # 临时文件
 tempCodeRunnerFile.py
 
-# 模拟持仓数据（个人交易记录）
-portfolio_data.json
-
 # 旧的隧道二维码
 qr_tunnel.png
 
