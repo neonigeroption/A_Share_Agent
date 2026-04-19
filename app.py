@@ -25,7 +25,7 @@ client = get_openai_client()
 
 # ================= 侧边栏：扫码手机体验（永久链接） =================
 # 🔗 Streamlit Cloud 永久 URL（部署后替换为实际地址）
-CLOUD_URL = "https://neonigeroption-a-share-agent-app.streamlit.app"
+CLOUD_URL = "https://ashareagent-9npwywvcfvnbv3zy65pash.streamlit.app"
 
 @st.cache_data
 def generate_qr_code(url):
