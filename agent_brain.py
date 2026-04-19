@@ -4,19 +4,13 @@ agent_brain.py — CLI 版 Agent 大脑 (命令行独立运行)
 适用场景：不启动 Streamlit，直接在终端跑分析。
 """
 
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
 from market_tool import get_today_top_stocks
 # 🔴 使用向量 RAG（替代旧的文本拼接）
 from vector_rag import rag_retrieve
+# 统一配置管理（st.secrets 优先，dotenv 兜底）
+from config import get_openai_client
 
-load_dotenv()
-
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL")
-)
+client = get_openai_client()
 
 def analyze_stocks():
     # 1. 获取感知层数据（量价数据）

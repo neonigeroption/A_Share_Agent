@@ -4,8 +4,11 @@ import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
-from openai import OpenAI
-from dotenv import load_dotenv
+import qrcode
+from io import BytesIO
+
+# 统一配置管理（st.secrets 优先，dotenv 兜底）
+from config import get_openai_client
 
 # 导入底层工具
 from market_tool import get_today_top_stocks, get_today_bottom_stocks, get_single_stock_quote, get_stock_history
@@ -18,21 +21,30 @@ from portfolio import load_portfolio, add_position, remove_position, get_portfol
 
 st.set_page_config(page_title="A_Share_Agent 游资终端", page_icon="🚀", layout="wide")
 
-load_dotenv()
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL")
-)
+client = get_openai_client()
 
-# ================= 侧边栏：手机外网演示入口 =================
-import os
-if os.path.exists("qr_tunnel.png"):
-    with st.sidebar:
-        st.markdown("### 📱 扫码手机体验")
-        st.image("qr_tunnel.png", use_container_width=True)
-        st.markdown("**公共演示网址:**")
-        st.code("https://a0fe583b0a2e88.lhr.life")
-        st.caption("提示：使用 5G 流量访问，无需连接校园内网。")
+# ================= 侧边栏：扫码手机体验（永久链接） =================
+# 🔗 Streamlit Cloud 永久 URL（部署后替换为实际地址）
+CLOUD_URL = "https://neonigeroption-a-share-agent-app.streamlit.app"
+
+@st.cache_data
+def generate_qr_code(url):
+    """动态生成二维码图片"""
+    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+with st.sidebar:
+    st.markdown("### 📱 扫码手机体验")
+    qr_bytes = generate_qr_code(CLOUD_URL)
+    st.image(qr_bytes, use_container_width=True)
+    st.markdown("**永久演示网址：**")
+    st.code(CLOUD_URL)
+    st.caption("☁️ 已部署到 Streamlit Cloud，24/7 在线，无需电脑开机。")
 # ================= Plotly 可视化组件 =================
 def render_momentum_gauge(value, title="市场势能", suffix="%"):
     """

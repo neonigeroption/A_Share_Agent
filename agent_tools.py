@@ -18,19 +18,15 @@ agent_tools.py — Function Calling 工具注册与 ReAct Agent 循环
 """
 
 import json
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
+
+# 统一配置管理（st.secrets 优先，dotenv 兜底）
+from config import get_openai_client
 
 # 导入实际的工具函数
 from market_tool import get_today_top_stocks, get_today_bottom_stocks, get_single_stock_quote
 from vector_rag import rag_retrieve
 
-load_dotenv()
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL")
-)
+client = get_openai_client()
 
 
 # ========== 第 1 步：定义工具清单（告诉 LLM 它有哪些工具可用）==========

@@ -1,5 +1,6 @@
 # 环境变量（含 API Key，绝对不能提交）
 .env
+.streamlit/secrets.toml
 
 # Python
 __pycache__/
@@ -15,3 +16,7 @@ tempCodeRunnerFile.py
 
 # 模拟持仓数据（个人交易记录）
 portfolio_data.json
+
+# 旧的隧道二维码
+qr_tunnel.png
+

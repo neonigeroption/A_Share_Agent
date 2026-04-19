@@ -13,21 +13,17 @@ vector_rag.py — 向量 RAG 核心模块 (FAISS + 智谱 Embedding)
     → 手写每一步，答辩时能讲清楚原理，不被问"你只是调了个库吧？"
 """
 
-import os
 import numpy as np
 import faiss
-from openai import OpenAI
-from dotenv import load_dotenv
+
+# 统一配置管理（st.secrets 优先，dotenv 兜底）
+from config import get_openai_client
 
 # 复用现有的新闻抓取函数
 from rag_search import get_realtime_news
 
 # ========== 初始化 ==========
-load_dotenv()
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL")
-)
+client = get_openai_client()
 
 
 # ========== 第 1 步：文本分块 (Chunking) ==========

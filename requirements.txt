@@ -6,3 +6,5 @@ pandas
 plotly
 faiss-cpu
 numpy
+qrcode
+Pillow
