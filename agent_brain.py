@@ -56,7 +56,7 @@ def analyze_stocks():
     print("🧠 游资总舵主正在融合情报，研判盘面...")
     try:
         response = client.chat.completions.create(
-            model="glm-4-flash", 
+            model="glm-4-air", 
             messages=[
                 {"role": "system", "content": "你是一个言辞犀利、眼里只有资金进出和核心逻辑的顶级游资。"},
                 {"role": "user", "content": prompt}

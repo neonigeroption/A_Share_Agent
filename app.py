@@ -1,6 +1,16 @@
+import sys
+# 强制标准输出/标准错误使用 UTF-8 编码并对无法编码的字符安全替换，从根本上解决 Windows 下 Emoji 导致的 UnicodeEncodeError
+try:
+    if sys.platform.startswith('win'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 import streamlit as st
 import pandas as pd
 import os
+import json
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
@@ -231,6 +241,58 @@ def render_kline_chart(hist_df, stock_name):
     return fig
 
 
+def render_consensus_banner(signal, confidence):
+    if signal == "bullish":
+        bg = "#3d1a1a"
+        color = "#FF4136"
+        label = "📈 联席共识信号：看多 (Bullish)"
+    elif signal == "bearish":
+        bg = "#1a3d1a"
+        color = "#2ECC40"
+        label = "📉 联席共识信号：看空 (Bearish)"
+    else:
+        bg = "#2d2d2d"
+        color = "#aaaaaa"
+        label = "⚖️ 联席共识信号：中性 (Neutral)"
+        
+    html = f"""
+    <div style="background-color: {bg}; padding: 15px; border-radius: 8px; border-left: 5px solid {color}; margin-bottom: 20px;">
+        <h3 style="margin: 0; color: {color};">{label}</h3>
+        <p style="margin: 5px 0 0 0; color: #ccc;">综合置信度: <b>{confidence * 100:.1f}%</b> | 4 大分析师协同决策结论已归档数据库</p>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_analyst_card(name, signal, confidence, details):
+    if signal == "bullish":
+        color = "#FF4136"
+        sig_text = "看多"
+    elif signal == "bearish":
+        color = "#2ECC40"
+        sig_text = "看空"
+    else:
+        color = "#aaaaaa"
+        sig_text = "中性"
+        
+    detail_html = "".join([f"<li>{k}: <b>{v}</b></li>" for k, v in details.items()])
+    
+    html = f"""
+    <div style="background-color: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; margin-bottom: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-weight: bold; color: #fff; font-size: 13px;">{name}</span>
+            <span style="background-color: {color}22; color: {color}; border: 1px solid {color}; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">
+                {sig_text} ({confidence * 100:.0f}%)
+            </span>
+        </div>
+        <ul style="margin: 0; padding-left: 20px; color: #bbb; font-size: 12px; line-height: 1.5;">
+            {detail_html}
+        </ul>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
 def display_rag_and_generate_report(df_targets, query_suffix, prompt_template, sys_sys_prompt, success_msg, report_title):
     """
     通用抽象组件：执行向量 RAG 检索并流式生成 AI 研报。
@@ -266,7 +328,7 @@ def display_rag_and_generate_report(df_targets, query_suffix, prompt_template, s
     with st.spinner("🔍 启动 FAISS 向量 RAG 链路：深挖底层逻辑..."):
         rag_context = ""
         all_chunks = []
-        for index, row in df_targets.iterrows():
+        for idx, (_, row) in enumerate(df_targets.iterrows()):
             name = row['名称']
             context, chunks = rag_retrieve(
                 name, 
@@ -274,6 +336,9 @@ def display_rag_and_generate_report(df_targets, query_suffix, prompt_template, s
             )
             rag_context += f"--- 【{name}】向量检索命中 ---\n{context}\n"
             all_chunks.extend(chunks)
+            if idx < len(df_targets) - 1:
+                import time
+                time.sleep(2.5) # 间隔2.5秒，彻底保障在低阶账户 QPS 限制下的安全
         
         with st.expander(f"👁️ 查看 FAISS 向量检索结果 (共命中 {len(all_chunks)} 个语义片段)"):
             if all_chunks:
@@ -289,11 +354,14 @@ def display_rag_and_generate_report(df_targets, query_suffix, prompt_template, s
         data=df_targets.to_string(index=False),
         rag_context=rag_context
     )
+    # 在 Embedding 和 LLM 之间安排冷却期，避免连续请求触发 QPS 限制
+    import time
+    time.sleep(3)
     
     report_placeholder = st.empty()
     try:
         stream = client.chat.completions.create(
-            model="glm-4-flash",
+            model="glm-4-air",
             messages=[
                 {"role": "system", "content": sys_sys_prompt},
                 {"role": "user", "content": prompt}
@@ -318,7 +386,11 @@ def display_rag_and_generate_report(df_targets, query_suffix, prompt_template, s
         report_placeholder.write_stream(stream_and_collect)
         st.success(success_msg)
     except Exception as e:
-        st.error(f"大脑异常: {e}")
+        err_msg = str(e)
+        if "1302" in err_msg or "429" in err_msg or "速率限制" in err_msg:
+            st.error("🚨 **智谱 AI 接口频率限制 / 账户欠费**\n\n**可能原因**：\n1. **请求太频繁**：免费版 API 有最高每分钟请求次数限制，请等待 5-10 秒后重新运行；\n2. **账户额度不足/已过期**：请检查您的智谱 AI 开发者平台账户余额或免费额度是否耗尽（[智谱大模型平台](https://open.bigmodel.cn/)）。")
+        else:
+            st.error(f"大脑异常: {e}")
 
 
 # ================= 侧边栏：终端控制台 =================
@@ -328,7 +400,7 @@ with st.sidebar:
     
     analysis_mode = st.radio(
         "选择侦察维度", 
-        ["🚀 涨幅榜异动狙击", "💣 跌幅榜恐慌排雷", "🔍 单股深度扫描", "🤖 Agent 自主决策"]
+        ["🚀 涨幅榜异动狙击", "💣 跌幅榜恐慌排雷", "🔍 单股深度扫描", "🤖 Agent 自主决策", "📜 研报历史记录", "🗄️ 数据库与终端日志"]
     )
     
     st.markdown("---")
@@ -365,8 +437,8 @@ if "portfolio_msg" in st.session_state:
     st.success(st.session_state.portfolio_msg)
     del st.session_state.portfolio_msg
 
-# 建立左右分栏（Agent 模式不用分栏）
-if analysis_mode != "🤖 Agent 自主决策":
+# 建立左右分栏（Agent、历史记录、数据库监控模式不用分栏）
+if analysis_mode not in ["🤖 Agent 自主决策", "📜 研报历史记录", "🗄️ 数据库与终端日志"]:
     col1, col2 = st.columns([1, 1.5])
 
 # ================= 逻辑分支 1：涨幅榜 =================
@@ -509,18 +581,152 @@ elif analysis_mode == "🔍 单股深度扫描":
                 st.warning("未能获取历史 K 线数据，可能是新股或接口异常。")
             
         with col2:
-            prompt_tpl = "【目标现价数据】:\n{data}\n【FAISS 向量 RAG 语义检索情报】:\n{rag_context}\n你是一个独立视角的顶级游资。请对该票进行定向体检：\n1. 结合今日量价和近期舆情，给该股近期的主力资金意图定性（吸筹、洗盘、拉高、出货？）。\n2. 如果我准备明早重仓买入，给我泼一盆冷水，指出最大的风险点。\n3. 给出一个严格的止损或止盈位建议。"
-            sys_prompt = "你是一个客观冷酷、一针见血的独立交易员。"
-            display_rag_and_generate_report(
-                df_targets=df.head(1),
-                query_suffix="近期的主力资金动向、核心事件和业绩变化",
-                prompt_template=prompt_tpl,
-                sys_sys_prompt=sys_prompt,
-                success_msg="✅ 深度靶向扫描完成！",
-                report_title=f"🧠 {stock_name} 独立研报"
-            )
+            tab_report, tab_agents = st.tabs(["🧠 独立深度研报", "👥 多智能体联席研判"])
+            
+            with tab_report:
+                prompt_tpl = "【目标现价数据】:\n{data}\n【FAISS 向量 RAG 语义检索情报】:\n{rag_context}\n你是一个独立视角的顶级游资。请对该票进行定向体检：\n1. 结合今日量价和近期舆情，给该股近期的主力资金意图定性（吸筹、洗盘、拉高、出货？）。\n2. 如果我准备明早重仓买入，给我泼一盆冷水，指出最大的风险点。\n3. 给出一个严格的止损或止盈位建议。"
+                sys_prompt = "你是一个客观冷酷、一针见血的独立交易员。"
+                display_rag_and_generate_report(
+                    df_targets=df.head(1),
+                    query_suffix="近期的主力资金动向、核心事件和业绩变化",
+                    prompt_template=prompt_tpl,
+                    sys_sys_prompt=sys_prompt,
+                    success_msg="✅ 深度靶向扫描完成！",
+                    report_title=f"🧠 {stock_name} 独立研报"
+                )
+                
+            with tab_agents:
+                st.subheader("👥 4 大专业分析师联席会商")
+                st.markdown("召集**技术面分析师**、**舆情分析师**、**基本面分析师**与**风险管理师**进行多维度联合打分研判。")
+                
+                agent_report_key = f"multi_agent_report_{stock_code}"
+                
+                if st.button("⚡ 启动多智能体联席会商", type="primary", key="btn_run_multi_agents"):
+                    with st.spinner("👥 正在召集分析师并调阅各项因子..."):
+                        # 1. 抓取舆情数据
+                        from vector_rag import rag_retrieve
+                        rag_context_text, _ = rag_retrieve(
+                            stock_name, 
+                            query="近期的主力资金动向、核心事件和业绩变化"
+                        )
+                        
+                        # 2. 准备基本面数据
+                        mkt_data = df.iloc[0].to_dict()
+                        
+                        # 3. 运行多智能体并保存到 session_state
+                        from analysts import run_all_analysts
+                        analyst_results = run_all_analysts(
+                            stock_name=stock_name,
+                            stock_code=stock_code,
+                            history_data=hist_df,
+                            rag_context=rag_context_text,
+                            market_data=mkt_data,
+                            portfolio_info=portfolio
+                        )
+                        st.session_state[agent_report_key] = analyst_results
+                        
+                        # 4. 计算综合评分
+                        score_map = {"bullish": 1.0, "bearish": -1.0, "neutral": 0.0}
+                        weighted_score = 0.0
+                        total_confidence = 0.0
+                        
+                        for k, v in analyst_results.items():
+                            res = v["result"]
+                            sig = res.get("signal", "neutral")
+                            conf = res.get("confidence", 0.5)
+                            weighted_score += score_map.get(sig, 0.0) * conf
+                            total_confidence += conf
+                            
+                        avg_score = weighted_score / len(analyst_results)
+                        avg_confidence = total_confidence / len(analyst_results)
+                        
+                        if avg_score > 0.2:
+                            consensus_label = "bullish"
+                        elif avg_score < -0.2:
+                            consensus_label = "bearish"
+                        else:
+                            consensus_label = "neutral"
+                            
+                        st.session_state[f"{agent_report_key}_consensus"] = {
+                            "signal": consensus_label,
+                            "confidence": avg_confidence
+                        }
+                        
+                        # 5. 保存结果到 SQLite 数据库
+                        try:
+                            from database import save_analysis
+                            signals_summary = {
+                                k: {"signal": v["result"]["signal"], "confidence": v["result"]["confidence"]}
+                                for k, v in analyst_results.items()
+                            }
+                            bull_arg = analyst_results.get("technical", {}).get("result", {}).get("reasoning", "")
+                            bear_arg = analyst_results.get("risk", {}).get("result", {}).get("reasoning", "")
+                            
+                            save_analysis(
+                                stock_code=stock_code,
+                                stock_name=stock_name,
+                                analysis_type="multi_agent",
+                                analyst_signals=signals_summary,
+                                bull_argument=bull_arg,
+                                bear_argument=bear_arg,
+                                final_signal=consensus_label,
+                                final_confidence=avg_confidence,
+                                final_report=json.dumps(analyst_results, ensure_ascii=False)
+                            )
+                        except Exception as db_err:
+                            st.warning(f"⚠️ 研报归档数据库失败: {db_err}")
+                
+                if agent_report_key in st.session_state:
+                    analyst_results = st.session_state[agent_report_key]
+                    consensus = st.session_state[f"{agent_report_key}_consensus"]
+                    
+                    render_consensus_banner(consensus["signal"], consensus["confidence"])
+                    
+                    col_card1, col_card2 = st.columns(2)
+                    with col_card1:
+                        tech = analyst_results.get("technical", {}).get("result", {})
+                        tech_metrics = tech.get("metrics", {})
+                        render_analyst_card("技术面分析师", tech.get("signal"), tech.get("confidence", 0.0), {
+                            "大势趋势": tech_metrics.get("trend", "N/A"),
+                            "核心指标": tech_metrics.get("key_indicator", "N/A")
+                        })
+                        
+                        sent = analyst_results.get("sentiment", {}).get("result", {})
+                        sent_metrics = sent.get("metrics", {})
+                        render_analyst_card("舆情分析师", sent.get("signal"), sent.get("confidence", 0.0), {
+                            "情绪打分": f"{sent_metrics.get('sentiment_score', 0):+.2f}",
+                            "新闻篇数": f"{sent_metrics.get('news_count', 0)} 篇"
+                        })
+                    with col_card2:
+                        fund = analyst_results.get("fundamental", {}).get("result", {})
+                        fund_metrics = fund.get("metrics", {})
+                        render_analyst_card("基本面分析师", fund.get("signal"), fund.get("confidence", 0.0), {
+                            "资金流向": fund_metrics.get("capital_flow", "N/A"),
+                            "成交意图": fund_metrics.get("volume_status", "N/A")
+                        })
+                        
+                        risk = analyst_results.get("risk", {}).get("result", {})
+                        risk_metrics = risk.get("metrics", {})
+                        render_analyst_card("风险管理师", risk.get("signal"), risk.get("confidence", 0.0), {
+                            "风险等级": risk_metrics.get("risk_level", "N/A"),
+                            "建议仓位": risk_metrics.get("suggested_position", "N/A"),
+                            "最大回撤": f"{risk_metrics.get('max_drawdown', 'N/A')}%" if isinstance(risk_metrics.get('max_drawdown'), (int, float)) else risk_metrics.get('max_drawdown', 'N/A')
+                        })
+                    
+                    st.markdown("### 🗣️ 分析师研判详情")
+                    with st.expander("📊 技术分析师论据"):
+                        st.write(analyst_results.get("technical", {}).get("result", {}).get("reasoning"))
+                    with st.expander("📰 舆情分析师论据"):
+                        st.write(analyst_results.get("sentiment", {}).get("result", {}).get("reasoning"))
+                    with st.expander("💰 基本面分析师论据"):
+                        st.write(analyst_results.get("fundamental", {}).get("result", {}).get("reasoning"))
+                    with st.expander("🛡️ 风险管理师评估"):
+                        st.write(analyst_results.get("risk", {}).get("result", {}).get("reasoning"))
+                else:
+                    st.info("💡 请点击上方按钮，启动 4 位虚拟分析师的联席研判会商。")
             
             # 💼 模拟买入按钮
+
             st.markdown("---")
             st.subheader("💼 模拟交易")
             sim_col1, sim_col2 = st.columns(2)
@@ -559,6 +765,9 @@ elif analysis_mode == "🤖 Agent 自主决策":
         st.session_state.agent_messages = []
     if "agent_history" not in st.session_state:
         st.session_state.agent_history = []
+    if "agent_session_id" not in st.session_state:
+        import uuid
+        st.session_state.agent_session_id = uuid.uuid4().hex
     
     # 展示历史对话
     for msg in st.session_state.agent_messages:
@@ -597,7 +806,8 @@ elif analysis_mode == "🤖 Agent 自主决策":
                     user_input,
                     history=st.session_state.agent_history,
                     temperature=ai_temp,
-                    on_tool_call=on_tool_call
+                    on_tool_call=on_tool_call,
+                    session_id=st.session_state.agent_session_id
                 )
             
             # 更新状态标签
@@ -628,6 +838,173 @@ elif analysis_mode == "🤖 Agent 自主决策":
             st.session_state.agent_messages = []
             st.session_state.agent_history = []
             st.rerun()
+
+# ================= 逻辑分支 5：研报历史记录 =================
+elif analysis_mode == "📜 研报历史记录":
+    st.subheader("📜 历史联席研判档案")
+    st.markdown("这里记录了所有过往多智能体联席会商的共识决策和分析报告。")
+    
+    from database import get_analysis_history
+    history = get_analysis_history(limit=50)
+    
+    if not history:
+        st.info("暂无历史研判记录，请前往“单股深度扫描”启动多智能体联席研判。")
+    else:
+        # Create a simplified list for display
+        df_display = pd.DataFrame([{
+            "ID": item["id"],
+            "时间": item["created_at"],
+            "代码": item["stock_code"],
+            "简称": item["stock_name"],
+            "共识信号": "看多 (Bullish)" if item["final_signal"] == "bullish" else ("看空 (Bearish)" if item["final_signal"] == "bearish" else "中性 (Neutral)"),
+            "置信度": f"{item['final_confidence']*100:.1f}%" if item["final_confidence"] else "N/A"
+        } for item in history])
+        
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        
+        st.markdown("### 🔍 档案调阅与详情回放")
+        selected_id = st.selectbox(
+            "选择要调阅的历史报告",
+            options=df_display["ID"].tolist(),
+            format_func=lambda x: f"报告 #{x} - {df_display[df_display['ID'] == x].iloc[0]['简称']}({df_display[df_display['ID'] == x].iloc[0]['代码']}) [{df_display[df_display['ID'] == x].iloc[0]['时间']}]"
+        )
+        
+        if selected_id:
+            # Find the selected item
+            record = next(item for item in history if item["id"] == selected_id)
+            
+            st.markdown("---")
+            # Render consensus banner
+            sig = record["final_signal"]
+            conf = record["final_confidence"] or 0.0
+            
+            render_consensus_banner(sig, conf)
+            
+            # Show details of individual analysts from final_report (JSON)
+            try:
+                analyst_details = json.loads(record["final_report"])
+                
+                # Render 4 analyst cards
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    tech = analyst_details.get("technical", {}).get("result", {})
+                    tech_metrics = tech.get("metrics", {})
+                    render_analyst_card("技术面分析师", tech.get("signal"), tech.get("confidence", 0.0), {
+                        "大势趋势": tech_metrics.get("trend", "N/A"),
+                        "核心指标": tech_metrics.get("key_indicator", "N/A")
+                    })
+                    
+                    sent = analyst_details.get("sentiment", {}).get("result", {})
+                    sent_metrics = sent.get("metrics", {})
+                    render_analyst_card("舆情分析师", sent.get("signal"), sent.get("confidence", 0.0), {
+                        "情绪打分": f"{sent_metrics.get('sentiment_score', 0):+.2f}",
+                        "新闻篇数": f"{sent_metrics.get('news_count', 0)} 篇"
+                    })
+                with col_b:
+                    fund = analyst_details.get("fundamental", {}).get("result", {})
+                    fund_metrics = fund.get("metrics", {})
+                    render_analyst_card("基本面分析师", fund.get("signal"), fund.get("confidence", 0.0), {
+                        "资金流向": fund_metrics.get("capital_flow", "N/A"),
+                        "成交意图": fund_metrics.get("volume_status", "N/A")
+                    })
+                    
+                    risk = analyst_details.get("risk", {}).get("result", {})
+                    risk_metrics = risk.get("metrics", {})
+                    render_analyst_card("风险管理师", risk.get("signal"), risk.get("confidence", 0.0), {
+                        "风险等级": risk_metrics.get("risk_level", "N/A"),
+                        "建议仓位": risk_metrics.get("suggested_position", "N/A"),
+                        "最大回撤": f"{risk_metrics.get('max_drawdown', 'N/A')}%" if isinstance(risk_metrics.get('max_drawdown'), (int, float)) else risk_metrics.get('max_drawdown', 'N/A')
+                    })
+                
+                st.markdown("### 🗣️ 分析师详细会商论据")
+                with st.expander("📊 查看技术面分析论据"):
+                    st.write(tech.get("reasoning"))
+                with st.expander("📰 查看舆情分析论据"):
+                    st.write(sent.get("reasoning"))
+                with st.expander("💰 查看基本面分析论据"):
+                    st.write(fund.get("reasoning"))
+                with st.expander("🛡️ 查看风险管理论据"):
+                    st.write(risk.get("reasoning"))
+            except Exception as parse_err:
+                st.warning(f"无法解析详细报告指标，仅展示文字概报: {parse_err}")
+                st.markdown("#### 多头论据：")
+                st.info(record["bull_argument"] or "无")
+                st.markdown("#### 空头论据：")
+                st.warning(record["bear_argument"] or "无")
+
+# ================= 逻辑分支 6：数据库与终端日志 =================
+elif analysis_mode == "🗄️ 数据库与终端日志":
+    st.subheader("🗄️ 关系型数据库 (SQLite) 状态监控")
+    st.markdown("这里是 A_Share_Agent 的数据透明层，以可视化的方式直接呈现实时数据库的表内容与 Agent 决策日志，实现“零黑盒”开发。")
+    
+    db_tab1, db_tab2, db_tab3 = st.tabs([
+        "🤖 Agent 工具调用日志 (agent_logs)", 
+        "💼 模拟持仓数据 (portfolio)", 
+        "📜 会商研报历史 (analysis_history)"
+    ])
+    
+    with db_tab1:
+        st.markdown("### 📝 Agent 底层决策工具链日志")
+        st.markdown("当 AI 扮演智能交易员运行 ReAct 流程时，它的每一步**工具调用、输入参数、工具返回结果**都会实时落库，确保完全可审计。")
+        
+        from database import get_agent_logs
+        logs = get_agent_logs(limit=100)
+        
+        if not logs:
+            st.info("暂无 Agent 日志记录。请前往“Agent 自主决策”模式启动运行。")
+        else:
+            df_logs = pd.DataFrame([{
+                "ID": item["id"],
+                "时间": item["created_at"],
+                "会话ID": item["session_id"],
+                "轮次": item["round_num"],
+                "调用工具": item["tool_name"],
+                "工具参数": item["tool_args"],
+                "执行结果预览": item["result_preview"]
+            } for item in logs])
+            
+            st.dataframe(df_logs, use_container_width=True, hide_index=True)
+            
+            st.markdown("#### 🔍 详细步骤审计")
+            log_id = st.selectbox("选择日志ID查看完整交互数据", options=df_logs["ID"].tolist(), key="select_log_id")
+            selected_log = next(item for item in logs if item["id"] == log_id)
+            
+            st.markdown(f"**调用时刻**：`{selected_log['created_at']}`")
+            st.markdown(f"**调用工具**：`{selected_log['tool_name']}`  (Round `{selected_log['round_num']}`) ")
+            st.markdown("**工具输入参数**：")
+            st.code(selected_log['tool_args'], language="json")
+            st.markdown("**工具返回内容**：")
+            st.code(selected_log['result_preview'])
+            
+    with db_tab2:
+        st.markdown("### 💼 SQLite 持仓数据表")
+        st.markdown("原先的 `portfolio_data.json` 已全部升级为关系型数据库管理，提高了并发读写安全性。")
+        
+        from database import get_connection
+        conn = get_connection()
+        portfolio_rows = conn.execute("SELECT * FROM portfolio").fetchall()
+        conn.close()
+        
+        if not portfolio_rows:
+            st.info("当前持仓为空。可在“单股深度扫描”页购买股票体验。")
+        else:
+            df_port = pd.DataFrame([dict(r) for r in portfolio_rows])
+            st.dataframe(df_port, use_container_width=True, hide_index=True)
+            
+    with db_tab3:
+        st.markdown("### 📜 SQLite 联席研报历史表")
+        st.markdown("记录每次联席会议的所有量化信号和文本评语。")
+        
+        from database import get_connection
+        conn = get_connection()
+        history_rows = conn.execute("SELECT id, stock_code, stock_name, final_signal, final_confidence, created_at FROM analysis_history ORDER BY id DESC").fetchall()
+        conn.close()
+        
+        if not history_rows:
+            st.info("当前历史记录为空。")
+        else:
+            df_hist = pd.DataFrame([dict(r) for r in history_rows])
+            st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
 # ================= 全局：模拟持仓管理面板 =================
 st.markdown("---")

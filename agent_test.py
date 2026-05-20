@@ -1,3 +1,12 @@
+import sys
+# 强制标准输出/标准错误使用 UTF-8 编码并对无法编码的字符安全替换，从根本上解决 Windows 下 Emoji 导致的 UnicodeEncodeError
+try:
+    if sys.platform.startswith('win'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 import os
 from dotenv import load_dotenv
 

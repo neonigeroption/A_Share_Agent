@@ -13,6 +13,8 @@ __pycache__/
 
 # 临时文件
 tempCodeRunnerFile.py
+test_*.py
+agent_data.db
 
 # 旧的隧道二维码
 qr_tunnel.png

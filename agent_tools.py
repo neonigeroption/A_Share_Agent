@@ -25,6 +25,7 @@ from config import get_openai_client
 # 导入实际的工具函数
 from market_tool import get_today_top_stocks, get_today_bottom_stocks, get_single_stock_quote
 from vector_rag import rag_retrieve
+from database import log_agent_call
 
 client = get_openai_client()
 
@@ -146,7 +147,7 @@ def execute_tool(tool_name, arguments_json):
 
 
 # ========== 第 3 步：ReAct Agent 循环 ==========
-def run_agent(user_message, history=None, temperature=0.7, on_tool_call=None):
+def run_agent(user_message, history=None, temperature=0.7, on_tool_call=None, session_id=None):
     """
     ReAct Agent 主循环：让 LLM 自主决定调用工具，循环执行直到得出最终答案。
     
@@ -162,6 +163,7 @@ def run_agent(user_message, history=None, temperature=0.7, on_tool_call=None):
         history: 历史对话记录（实现多轮对话）
         temperature: LLM 的 temperature
         on_tool_call: 回调函数，每次调用工具时触发（用于 UI 展示进度）
+        session_id: 会话唯一标识，用于在 SQLite 中记录日志
     
     返回：
         final_response: LLM 的最终文本回答
@@ -196,7 +198,7 @@ def run_agent(user_message, history=None, temperature=0.7, on_tool_call=None):
     for round_num in range(max_rounds):
         try:
             response = client.chat.completions.create(
-                model="glm-4-flash",
+                model="glm-4-air",
                 messages=messages,
                 tools=TOOL_DEFINITIONS,
                 temperature=temperature,
@@ -228,8 +230,16 @@ def run_agent(user_message, history=None, temperature=0.7, on_tool_call=None):
                 
                 # 执行工具
                 result = execute_tool(func_name, func_args)
-                log_entry["result_preview"] = result[:200] + "..." if len(result) > 200 else result
+                result_preview = result[:200] + "..." if len(result) > 200 else result
+                log_entry["result_preview"] = result_preview
                 tool_log.append(log_entry)
+                
+                # 保存工具调用日志到数据库
+                try:
+                    active_session = session_id or "session_default"
+                    log_agent_call(active_session, round_num + 1, func_name, func_args, result_preview)
+                except Exception as db_err:
+                    print(f"⚠️ 写入数据库日志失败: {db_err}")
                 
                 # 把工具结果喂回给 LLM
                 messages.append({

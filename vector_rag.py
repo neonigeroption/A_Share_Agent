@@ -15,6 +15,7 @@ vector_rag.py — 向量 RAG 核心模块 (FAISS + 智谱 Embedding)
 
 import numpy as np
 import faiss
+import time
 
 # 统一配置管理（st.secrets 优先，dotenv 兜底）
 from config import get_openai_client
@@ -77,12 +78,24 @@ def get_embedding(text):
     返回：
         一个 numpy 数组，形如 [0.01, -0.03, 0.15, ...] (2048个数字)
     """
-    response = client.embeddings.create(
-        model="embedding-3",       # 智谱的 embedding 模型
-        input=text                 # 要编码的文本
-    )
-    # response.data[0].embedding 是一个 Python list，转成 numpy 数组方便后续计算
-    return np.array(response.data[0].embedding, dtype=np.float32)
+    retries = 3
+    delay = 5
+    for i in range(retries):
+        try:
+            response = client.embeddings.create(
+                model="embedding-3",       # 智谱的 embedding 模型
+                input=text                 # 要编码的文本
+            )
+            # response.data[0].embedding 是一个 Python list，转成 numpy 数组方便后续计算
+            return np.array(response.data[0].embedding, dtype=np.float32)
+        except Exception as e:
+            # 捕获速率限制 (429/1302) 并重试
+            err_msg = str(e)
+            if "429" in err_msg or "1302" in err_msg:
+                if i < retries - 1:
+                    time.sleep(delay * (2 ** i))
+                    continue
+            raise e
 
 
 def get_embeddings_batch(texts):
@@ -93,13 +106,26 @@ def get_embeddings_batch(texts):
     if not texts:
         return np.array([])
     
-    response = client.embeddings.create(
-        model="embedding-3",
-        input=texts                # 传一个列表进去，一次全转
-    )
-    # 按顺序取出每个文本的向量
-    embeddings = [item.embedding for item in response.data]
-    return np.array(embeddings, dtype=np.float32)
+    retries = 3
+    delay = 5
+    for i in range(retries):
+        try:
+            response = client.embeddings.create(
+                model="embedding-3",
+                input=texts                # 传一个列表进去，一次全转
+            )
+            # 按顺序取出每个文本的向量
+            embeddings = [item.embedding for item in response.data]
+            return np.array(embeddings, dtype=np.float32)
+        except Exception as e:
+            # 捕获速率限制 (429/1302) 并重试
+            err_msg = str(e)
+            if "429" in err_msg or "1302" in err_msg:
+                if i < retries - 1:
+                    time.sleep(delay * (2 ** i))
+                    continue
+            raise e
+
 
 
 # ========== 第 3 步：构建 FAISS 向量索引 (Indexing) ==========
@@ -202,18 +228,28 @@ def rag_retrieve(stock_name, query, news_count=10, top_k=5):
     
     print(f"✂️ 文本已切分为 {len(chunks)} 个块")
     
-    # 第 2+3 步：Embedding + 建索引
+    # 第 2+3+4 步：合并 Query 和分块，进行一次性批量 Embedding 转换，将 API 请求数减半以规避 QPS 速率限制
     try:
-        index, _ = build_faiss_index(chunks)
+        all_texts = [query] + chunks
+        all_vectors = get_embeddings_batch(all_texts)
+        
+        # 提取 Query 向量与分块向量
+        query_vector = all_vectors[0].reshape(1, -1)
+        chunk_vectors = all_vectors[1:]
+        
+        # 构建 FAISS 索引
+        dimension = chunk_vectors.shape[1]
+        index = faiss.IndexFlatL2(dimension)
+        index.add(chunk_vectors)
+        
+        # 语义检索：寻找与 Query 距离最近的 Top-K 向量
+        distances, indices = index.search(query_vector, min(top_k, len(chunks)))
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx < len(chunks):   # 防止越界
+                results.append((chunks[idx], float(distances[0][i])))
     except Exception as e:
-        print(f"⚠️ 向量索引构建失败: {e}")
-        return raw_news, []     # 降级：返回原始新闻文本
-    
-    # 第 4 步：语义检索
-    try:
-        results = search_relevant_chunks(query, index, chunks, top_k=top_k)
-    except Exception as e:
-        print(f"⚠️ 向量检索失败: {e}")
+        print(f"⚠️ 向量 RAG 计算失败 (将降级为原始新闻文本展示): {e}")
         return raw_news, []     # 降级：返回原始新闻文本
     
     # 拼接检索结果

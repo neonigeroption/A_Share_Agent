@@ -13,7 +13,7 @@ portfolio.py — 模拟持仓管理模块
 import json
 import os
 from datetime import datetime
-
+from database import db_load_portfolio, db_save_portfolio
 
 # 持仓数据文件路径
 PORTFOLIO_FILE = os.path.join(os.path.dirname(__file__), "portfolio_data.json")
@@ -21,33 +21,14 @@ PORTFOLIO_FILE = os.path.join(os.path.dirname(__file__), "portfolio_data.json")
 
 def load_portfolio():
     """
-    从本地 JSON 文件加载持仓数据。
-    
-    数据格式：
-    {
-        "600519": {
-            "code": "600519",
-            "name": "贵州茅台",
-            "buy_price": 1800.00,
-            "shares": 100,
-            "buy_time": "2026-04-06 12:00:00"
-        },
-        ...
-    }
+    从本地 SQLite 数据库加载持仓数据。
     """
-    if os.path.exists(PORTFOLIO_FILE):
-        try:
-            with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return {}
-    return {}
+    return db_load_portfolio()
 
 
 def save_portfolio(portfolio):
-    """把持仓数据保存到本地 JSON 文件。"""
-    with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
-        json.dump(portfolio, f, ensure_ascii=False, indent=2)
+    """把持仓数据保存到本地 SQLite 数据库。"""
+    db_save_portfolio(portfolio)
 
 
 def add_position(code, name, price, shares):
